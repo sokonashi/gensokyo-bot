@@ -116,7 +116,7 @@ class GPT2Generator:
         self.model_dir = "models"
         self.checkpoint_path = os.path.join(self.model_dir, self.model_name)
         assert os.path.exists(self.checkpoint_path), "Make sure to download the pytorch v5 model and put it in " + self.checkpoint_path
-        self.checkpoint_path = "gpt2"
+        #self.checkpoint_path = "gpt2"
         self.device = torch.device("cuda" if not CPU else "cpu")
         logger.info("Using device={}, checkpoint={}, dtype={}".format(self.device, self.checkpoint_path, self.dtype))
 
