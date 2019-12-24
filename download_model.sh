@@ -8,8 +8,8 @@ MODEL_VERSION=model_v5
 
 MODEL_DIRECTORY="${MODELS_DIRECTORY}"
 
-MODEL_NAME=model-550
-MODEL_TORRENT_URL="https://github.com/AIDungeon/AIDungeon/files/3935881/model_v5.torrent.zip"
+MODEL_NAME=pytorch-gpt2-xl-aid2-v5
+MODEL_TORRENT_URL="https://github.com/AccidentallyOnPurpose/pytorch-AIDungeon/blob/f692e39d84/generator/gpt2/models/model_v5_pytorch.torrent?raw=true"
 MODEL_TORRENT_BASENAME="$(basename "${MODEL_TORRENT_URL}")"
 
 download_torrent() {
@@ -34,6 +34,7 @@ download_torrent() {
       --disable-ipv6 \
       "${MODEL_TORRENT_BASENAME%.*}"
     echo "Download Complete!"
+    mv "${MODEL_TORRENT_BASENAME%.*}" $MODEL_NAME
     fi
 }
 
