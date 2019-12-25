@@ -171,9 +171,16 @@ def play(generator):
                 colPrint('Suggested actions:', colors['selection-value'])
                 action_suggestion_lines = 1
                 for i in range(settings.getint('action-alternatives')):
-                    # FIXME it might be better to pass in a longer history
-                    action_prompt = story_manager.story_context()  # This should be within the loop as it has a random sampling element
-                    action_prompt[-1] += '> '
+                    # New way
+                    # action_prompt = story_manager.story_context()  # This should be within the loop as it has a random sampling element
+                    # action_prompt[-1] += '\n>'
+
+                    # # OLD way
+                    action_prompt = (
+                        story_manager.story.results[-1]
+                        if story_manager.story.results
+                        else "\nWhat do you do now?"
+                    ) + "\n>"
                     logger.debug("action_prompt %s", action_prompt)
                     suggested_action = ai_player.get_action(action_prompt)
                     suggested_actions.append(suggested_action)
