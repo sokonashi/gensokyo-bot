@@ -291,6 +291,88 @@ def newStory(generator, prompt, context):
     print("\n\n")
     return story
 
+alphabets= "([A-Za-z])"
+prefixes = "(Mr|St|Mrs|Ms|Dr)[.]"
+suffixes = "(Inc|Ltd|Jr|Sr|Co)"
+starters = "(Mr|Mrs|Ms|Dr|He\s|She\s|It\s|They\s|Their\s|Our\s|We\s|But\s|However\s|That\s|This\s|Wherever)"
+acronyms = "([A-Z][.][A-Z][.](?:[A-Z][.])?)"
+websites = "[.](com|ca|gg|tv|co|net|org|io|gov)"
+
+def splitIntoSentences(text):
+    text = " " + text + "  "
+    text = text.replace("\n"," ")
+    text = re.sub(prefixes,"\\1<prd>",text)
+    text = re.sub(websites,"<prd>\\1",text)
+    if "Ph.D" in text: text = text.replace("Ph.D.","Ph<prd>D<prd>")
+    text = re.sub("\s" + alphabets + "[.] "," \\1<prd> ",text)
+    text = re.sub(acronyms+" "+starters,"\\1<stop> \\2",text)
+    text = re.sub(alphabets + "[.]" + alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>\\3<prd>",text)
+    text = re.sub(alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>",text)
+    text = re.sub(" "+suffixes+"[.] "+starters," \\1<stop> \\2",text)
+    text = re.sub(" "+suffixes+"[.]"," \\1<prd>",text)
+    text = re.sub(" " + alphabets + "[.]"," \\1<prd>",text)
+    text = text.replace(".",".<stop>")
+    text = text.replace("?","?<stop>")
+    text = text.replace("!","!<stop>")
+    text = text.replace(".<stop>\"", ".\"<stop>")
+    text = text.replace("?<stop>\"", "?\"<stop>")
+    text = text.replace("!<stop>\"", "!\"<stop>")
+    text = text.replace("<prd>",".")
+    sentences = text.split("<stop>")
+    sentences = sentences[:-1]
+    sentences = [s.strip() for s in sentences]
+    return sentences
+
+def listSentences(sentences):
+    i = 0
+    for s in sentences:
+        colPrint(str(i) + ") " + s, colors['menu'])
+        i += 1
+    colPrint(str(len(sentences)) + ") (Back)", colors['menu'])
+
+def alterText(text):
+    sentences = splitIntoSentences(text)
+    while True:
+        colPrint("\n" + " ".join(sentences) + "\n", colors['menu'])
+        colPrint("\n0) Edit a sentence.\n1) Remove a sentence.\n2) Add a sentence.\n3) Edit entire prompt.\n4) Save and finish.", colors['menu'], wrap=False)
+        colPrint("\nChoose an option: ", colors['menu'], wrap=False)
+        try:
+            i = getNumberInput(4)
+        except:
+            continue
+        if i == 0:
+            while True:
+                listSentences(sentences)
+                i = getNumberInput(len(sentences))
+                if i == len(sentences):
+                    break
+                else:
+                    colPrint("\n" + sentences[i], colors['menu'])
+                    sentences[i] = colInput("\nEnter the altered sentence: ", colors['menu'])
+        elif i == 1:
+            while True:
+                listSentences(sentences)
+                i = getNumberInput(len(sentences))
+                if i == len(sentences):
+                    break
+                else:
+                    del sentences[i]
+        elif i == 2:
+            while True:
+                listSentences(sentences)
+                i = getNumberInput(len(sentences))
+                if i == len(sentences):
+                    break
+                else:
+                    sentences.insert(i+1, colInput("\nEnter the new sentence: ", colors['menu']))
+        elif i == 3:
+            colPrint("\n" + " ".join(sentences), colors['menu'])
+            text = colInput("\nEnter the new altered prompt: ", colors['menu'])
+            sentences = splitIntoSentences(text)
+        elif i == 4:
+            break
+    return " ".join(sentences)
+
 def play(generator):
     print("\n")
 
@@ -461,6 +543,22 @@ def play(generator):
                 colPrint(story.story[-1][1][0], colors["ai-text"])
 
                 continue
+
+            elif action == "/alter":
+                story.story[-1][1][0] = alterText(story.story[-1][1][0])
+                if len(story.story)<2:
+                    colPrint(story.prompt, colors["ai-text"])
+                else:
+                    colPrint("\n" + story.story[-1][0] + "\n", colors["transformed-user-text"])
+                colPrint("\n" + story.story[-1][1][0] + "\n\n", colors["ai-text"])
+
+            elif action == "/prompt":
+                story.prompt = alterText(story.prompt)
+                if len(story.story)<2:
+                    colPrint(story.prompt, colors["ai-text"])
+                else:
+                    colPrint("\n" + story.story[-1][0] + "\n", colors["transformed-user-text"])
+                colPrint("\n" + story.story[-1][1][0] + "\n\n", colors["ai-text"])
 
             else:
                 if act_alts > 0:
