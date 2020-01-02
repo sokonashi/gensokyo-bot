@@ -5,6 +5,7 @@ from prompt_toolkit.layout.containers import (
     HSplit,
     Window,
 )
+from prompt_toolkit.styles import Style
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.widgets import (
@@ -21,12 +22,26 @@ def edit_multiline(default_text=""):
         """
         Pressing Ctrl-Q, Alt+Enter or Esc + Enter will exit the editor.
         """
+        bottom_bar.style="hidden"
         event.app.exit(text_field.text)
 
     @kb.add('c-c')
     def do_copy(event):
         data = text_field.buffer.copy_selection()
         get_app().clipboard.set_data(data)
+
+    @kb.add('c-x', eager=True)
+    def do_cut(event):
+        data = text_field.buffer.cut_selection()
+        get_app().clipboard.set_data(data)
+
+    @kb.add('c-z')
+    def do_undo(event):
+        text_field.buffer.undo()
+
+    @kb.add('c-y')
+    def do_redo(event):
+        text_field.buffer.redo()
 
     @kb.add('c-a')
     def do_select_all(event):
@@ -69,11 +84,11 @@ def edit_multiline(default_text=""):
 
 
     text_field = TextArea()
+    bottom_bar=Window(content=FormattedTextControl(text='\nCurrently editing. Press Ctrl+Q, Alt+Enter or Esc + Enter to exit.'))
 
     root_container = HSplit([
         text_field,
-
-        Window(content=FormattedTextControl(text='\nCurrently editing. Press Ctrl+Q, Alt+Enter or Esc + Enter to exit.')),
+        bottom_bar,
     ])
 
     layout = Layout(root_container)

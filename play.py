@@ -80,12 +80,12 @@ else:
     try:
         if not settings.getboolean('prompt-toolkit'):
             raise ModuleNotFoundError
-        TOOLKIT_ENABLED = True
         from inline_editor import edit_multiline
         from prompt_toolkit import prompt as ptprompt
         from prompt_toolkit import print_formatted_text
         from prompt_toolkit.styles import Style
-        from prompt_toolkit.formatted_text import to_formatted_text, HTML
+        from prompt_toolkit.formatted_text import to_formatted_text, HTML, ANSI, FormattedText
+        TOOLKIT_ENABLED = True
 
         colors = ptcolors
 
@@ -333,14 +333,19 @@ def play(generator):
         colPrint(file.read(), colors["title"], wrap=False)
 
     with open(Path("interface", "subTitle.txt"), "r", encoding="utf-8") as file:
-        if TOOLKIT_ENABLED:
-            colPrint(file.read(), colors["subtitle"], wrap=False)
-        else:
-            cols = termWidth
-            for line in file:
-                line=re.sub(r'\n', '', line)
-                line=line[:cols]
-                #fills in the graphic using reverse video mode substituted into the areas between |'s
+        cols = termWidth
+        for line in file:
+            line=re.sub(r'\n', '', line)
+            line=line[:cols]
+            #fills in the graphic using reverse video mode substituted into the areas between |'s
+            if TOOLKIT_ENABLED:
+                style = Style.from_dict({
+                    'nor': colors['subtitle'],
+                    'rev': colors['subtitle'] + ' reverse',
+                })
+                text = re.sub(r'\|[ _]*(\||$)', lambda x: '<rev>'+x.group(0)+'</rev>', line)
+                print_formatted_text(HTML('<nor>' + text + '</nor>'), style=style)
+            else:
                 colPrint(re.sub(r'\|[ _]*(\||$)', lambda x: '\x1B[7m'+x.group(0)+'\x1B[27m', line), colors['subtitle'], False)
 
     print()
@@ -465,6 +470,20 @@ def play(generator):
                 print("\nPRINTING\n")
                 #TODO colorize printed story
                 colPrint(str(story), colors["print-story"])
+            elif action.startswith('/remember'):
+                story.prompt += '\n' + action[9:].lstrip()
+                colPrint("Done. To view and edit memory in full, use /prompt.\n", colors['message'])
+                continue
+            elif TOOLKIT_ENABLED and action == '/prompt':
+                story.prompt = edit_multiline(story.prompt)
+                colPrint(">" + story.story[-1][0].lstrip().lstrip("> \n"), colors["transformed-user-text"])
+                print()
+                colPrint(story.story[-1][1][0], colors['ai-text'], end='')
+                print()
+                continue
+            elif TOOLKIT_ENABLED and action == '/alter':
+                story.story[-1][1][0] = edit_multiline(story.story[-1][1][0])
+                continue
             elif action == '/retry':
 
                 if len(story.story) == 1:
