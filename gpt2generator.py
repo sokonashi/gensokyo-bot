@@ -4,6 +4,7 @@ import itertools
 import torch
 import torch.nn.functional as F
 import re
+import math
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from getconfig import settings, logger
 from utils import cut_trailing_sentence
@@ -13,6 +14,10 @@ if not settings.getboolean('force-cpu') and not torch.cuda.is_available():
 
 DTYPE = torch.float32 if  ((not torch.cuda.is_available()) or settings.getboolean('force-cpu')) else torch.float16
 logger.info('Cuda Available: {}    Force CPU: {}    Precision: {}'.format(torch.cuda.is_available(), settings.getboolean('force-cpu'), '32-bit' if DTYPE==torch.float32 else '16-bit'))
+MIN_GENERATION_LENGTH=4
+NUM_SAMPLES=100
+#NOTE TODO Converts a sequence of tokens (string) in a single string. The most simple way to do it is ‘ ‘.join(self.convert_ids_to_tokens(token_ids)) but we often want to remove sub-word tokenization artifacts at the same time.
+
 
 # warnings.filterwarnings("ignore")
 MODEL_CLASSES = {
@@ -81,6 +86,35 @@ def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float("Inf")
         logits[indices_to_remove] = filter_value
     return logits
 
+#premature optimization is the root of all evil
+def sample_token(logits, genList, repetition_penalty, device):
+    #many possible optimizations here
+    #May help to switch to CPU at this stage
+    #we don't need a softmax here but it's *possibly* more numerically stable than an exp.
+    penalty_list={}
+    for gtoken in genList:
+        penalty_list[gtoken]=repetition_penalty
+    probs = F.softmax(logits, dim=-1)
+    selection_tokens=[]
+    selection_logits=torch.zeros(NUM_SAMPLES, device=device)
+    for i in range(NUM_SAMPLES):
+        token = torch.multinomial(probs, num_samples=1)[0]
+        tokenInt = token.item()
+        selection_tokens.append(tokenInt)
+        tokenStr = tokenizer.convert_ids_to_tokens(tokenInt)
+        #print(tokenStr)
+        #genList.append(token)
+        if tokenStr in penalty_list:
+            probs[tokenInt] /= penalty_list[tokenStr]
+            selection_logits -= math.log(penalty_list[tokenStr])
+            del penalty_list[tokenStr]
+
+        #print(tokenizer.decode(genList))
+        #genList.pop()
+
+    token_index = torch.multinomial(F.softmax(selection_logits, dim=-1), num_samples=1).item()
+    return selection_tokens[token_index]
+
 
 #length should be max length, other settings should be removed, device should not be set
 #we could possibly optimize this by having larger batch sizes but it would likely double or more the memory requirements
@@ -88,6 +122,7 @@ def sample_sequence(
     model,
     length,
     context,
+    previousText=None,
     num_samples=1,
     temperature=1,
     top_k=0,
@@ -101,6 +136,7 @@ def sample_sequence(
     stop_tokens=None,
     tokenizer=None
 ):
+    #can probably remove this now
     logger.debug('temp: {}    top_k: {}    top_p: {}    rep-pen: {}'.format(temperature, top_k, top_p, repetition_penalty))
     context = torch.tensor(context, dtype=torch.long, device=device)
     context = context.unsqueeze(0).repeat(num_samples, 1)
@@ -108,10 +144,12 @@ def sample_sequence(
     USE_PAST = True
     next_token = context
     outputs = None
+    logger.warning("DELET THIS")
+    top_k=1000
+    top_p =0
     with torch.no_grad():
         for j in range(length):
             #why would we ever not use past?
-            #is generated and next_token always same thing?
             if USE_PAST:
                 past = outputs[1] if outputs is not None else None
                 inputs = {"input_ids": next_token, "past": past}
@@ -122,29 +160,29 @@ def sample_sequence(
                 **inputs
             )  # Note: we could also use 'past' with GPT-2/Transfo-XL/XLNet/CTRL (cached hidden-states)
 
-            logits=outputs[0][:, -1, :].float()
-
-            #Originally the order was Temperature, Repetition Penalty, then top-k/p
-            if settings.getboolean('top-p-first'):
-                logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
+            logits=outputs[0][:, -1, :][0].float()
+            logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
 
             logits = logits/(temperature if temperature > 0 else 1.0)
 
-            # repetition penalty from CTRL (https://arxiv.org/abs/1909.05858)
-            for i in range(num_samples):
-                for k in set(generated[i].tolist()):
-                    logits[i, k] /= repetition_penalty
-
-            if not settings.getboolean('top-p-first'):
-                logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
+            genList = generated[0].tolist()
+            if previousText is not None:
+                genList.extend(previousText.tolist())
+            expRepPen = math.exp(repetition_penalty)
+            for k in set(genList):
+                logits[k] -= expRepPen
 
 
             if temperature == 0:  # greedy sampling:
                 next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
             else:
-                next_token = torch.multinomial(
-                    F.softmax(logits, dim=-1), num_samples=1
-                )
+                #token_id=sample_token(logits, genList, repetition_penalty, device)
+                token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
+                next_token = torch.LongTensor([token_index]).to(device).unsqueeze(-1)#.unsqueeze(-1)
+
+
+
+
             generated = torch.cat((generated, next_token), dim=1)
             if (
                 (stop_tokens is not None)
@@ -152,6 +190,7 @@ def sample_sequence(
                 and (next_token[0][0] in stop_tokens)
             ):
                 # Why the minimum tokens, j>X. Because sometimes the models starts with whitespace, which will strip away anyway. Having a minimum amount of tokens before we stop usually means we don't just stop because of "\n " or similar
+                #but we don't care about \n
                 logger.debug(
                     "Stopping generation as we found stop tokens. One of `%s`, in '%s'. token generated `%s`",
                     stop_tokens,
@@ -159,14 +198,15 @@ def sample_sequence(
                     j,
                 )
                 break
+
     return generated
 
 
-def truncate_multiple_sequences(seqs, max_len=100):
-    """Truncate multiple sequences, longest first, removing first."""
-    while sum(len(s) for s in seqs) > max_len:
-        longest = sorted(seqs, key=len, reverse=True)[0]
-        longest.pop(0)
+#def truncate_multiple_sequences(seqs, max_len=100):
+#    """Truncate multiple sequences, longest first, removing first."""
+#    while sum(len(s) for s in seqs) > max_len:
+#        longest = sorted(seqs, key=len, reverse=True)[0]
+#        longest.pop(0)
 
 
 class GPT2Generator:
