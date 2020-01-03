@@ -9,14 +9,12 @@ from transformers import GPT2LMHeadModel, GPT2Tokenizer
 from getconfig import settings, logger
 from utils import cut_trailing_sentence
 
-if not settings.getboolean('force-cpu') and not torch.cuda.is_available():
-    logger.warning('CUDA is not available, you are limited to CPU only.')
-
-DTYPE = torch.float32 if  ((not torch.cuda.is_available()) or settings.getboolean('force-cpu')) else torch.float16
-logger.info('Cuda Available: {}    Force CPU: {}    Precision: {}'.format(torch.cuda.is_available(), settings.getboolean('force-cpu'), '32-bit' if DTYPE==torch.float32 else '16-bit'))
 MIN_GENERATION_LENGTH=4
 NUM_SAMPLES=100
 #NOTE TODO Converts a sequence of tokens (string) in a single string. The most simple way to do it is ‘ ‘.join(self.convert_ids_to_tokens(token_ids)) but we often want to remove sub-word tokenization artifacts at the same time.
+
+#This is a functional mess.
+#Lets fix this by making multiple generators that share a single model.
 
 
 # warnings.filterwarnings("ignore")
@@ -128,13 +126,11 @@ def sample_sequence(
     top_k=0,
     top_p=0.9,
     repetition_penalty=1.0,
-    is_xlnet=False,
-    is_xlm_mlm=False,
-    xlm_mask_token=None,
-    xlm_lang=None,
+    too_short_penalty=5,
+    min_gen_length=1,
     device="cpu",
     stop_tokens=None,
-    tokenizer=None
+    tokenizer=None,
 ):
     #can probably remove this now
     logger.debug('temp: {}    top_k: {}    top_p: {}    rep-pen: {}'.format(temperature, top_k, top_p, repetition_penalty))
@@ -165,6 +161,12 @@ def sample_sequence(
 
             logits = logits/(temperature if temperature > 0 else 1.0)
 
+            shortPen=math.exp(too_short_penalty)
+            if stop_tokens is not None:
+                if j<min_gen_length:
+                    for k in stop_tokens:
+                        logits[stop_token]-=shortPen
+                    
             genList = generated[0].tolist()
             if previousText is not None:
                 genList.extend(previousText.tolist())
@@ -180,23 +182,11 @@ def sample_sequence(
                 token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
                 next_token = torch.LongTensor([token_index]).to(device).unsqueeze(-1)#.unsqueeze(-1)
 
-
-
-
             generated = torch.cat((generated, next_token), dim=1)
-            if (
-                (stop_tokens is not None)
-                and (j > 4)
-                and (next_token[0][0] in stop_tokens)
-            ):
-                # Why the minimum tokens, j>X. Because sometimes the models starts with whitespace, which will strip away anyway. Having a minimum amount of tokens before we stop usually means we don't just stop because of "\n " or similar
-                #but we don't care about \n
-                logger.debug(
-                    "Stopping generation as we found stop tokens. One of `%s`, in '%s'. token generated `%s`",
-                    stop_tokens,
-                    next_token,
-                    j,
-                )
+            #disabled clean up of spaces, see what effect this has TODO
+            genText = self.tokenizer.decode( o, clean_up_tokenization_spaces=False, skip_special_tokens=True)
+            if re.search(stop_pattern, genText):
+                logger.debug('Stopping Generation Early as stop condition reached')
                 break
 
     return generated
@@ -208,46 +198,61 @@ def sample_sequence(
 #        longest = sorted(seqs, key=len, reverse=True)[0]
 #        longest.pop(0)
 
+function strDtype(dtype):
+    return re.search('\d+', str(dtype)).group(0)
+
+#this class solves the problem of reusing different models
+class ModelContainer:
+    def __init__(model_path=Path('models', 'pytorch-16BIT-model_v5', device=None, dtype=None):
+        if device is None:
+            if settings.getboolean('force-cpu'):
+                device='cpu'
+            elif torch.cuda.is_available():
+                device='cuda'
+            else:
+                logger.warning('CUDA is not available, you are limited to CPU only.')
+                device='cpu'
+        self.device=device
+        self.dtype=dtype if dtype else (torch.float32 if device=='cpu' else torch.float16)
+        self.checkpoint_path = Path(model_path)
+        if os.environ.get("DEBUG_GPT2", False):
+            self.checkpoint_path = Path('models', 'gpt2-small')
+            logger.warning("using DEBUG_GPT2 MODE! This is just for devs to quickly check a small GPT2 model with poor output")
+        if not self.checkpoint_path.exists():
+            raise FileNotFoundError("Could not find {} Make sure to download a pytorch model and put it in the models directory!".format(str(self.checkpoint_path)))
+
+        logger.info('Device: {}    Cuda Available: {}    Force CPU: {}    Precision: {}    Model Path: {}'.format(
+            self.device,
+            torch.cuda.is_available(),
+            settings.getboolean('force-cpu'),
+            strDtype(self.dtype)+'-bit',
+            str(self.checkpoint_path)))
+
+        self.tokenizer = GPT2Tokenizer.from_pretrained(str(self.checkpoint_path))
+        self.model = GPT2LMHeadModel.from_pretrained(str(self.checkpoint_path))
+        if self.model.dtype != self.dtype:
+            logger.warning("Model is {}-bits but you are running at {}-bits. It can be converted in memory fine. But you may benefit from a model that's natively {}-bits.".format(strDtype(self.model.dtype), strDtype(self.dtype), strDtype(self.model.dtype)))
+        self.model.to(self.dtype).to(self.device)
+        self.model.eval()
+
+
 
 class GPT2Generator:
     def __init__(
-        self, generate_num=60, temperature=0.4, top_k=40, top_p=0.9, dtype=DTYPE, model_path=Path('models', 'pytorch-gpt2-xl-aid2-v5'), repetition_penalty=1,
+        self, model_container=None, model_path=None, generate_num=60, stop_words=['<|endoftext|'], max_history_tokens=1024, temperature=0.4, top_k=0, top_p=0.9, dtype=None, device=None, repetition_penalty=1.05,
     ):
         self.generate_num = generate_num
         self.temp = temperature
         self.top_k = top_k
         self.top_p = top_p
-        self.samples = 1
-        self.dtype = dtype
         self.repetition_penalty = repetition_penalty
-        self.batch_size = 1
-        self.max_history_tokens = 1024 - generate_num
-        self.stop_token = "<|endoftext|>"
-
-        self.checkpoint_path = Path(model_path)
-        if not self.checkpoint_path.exists():
-            raise FileNotFoundError("Could not find {} Make sure to download a pytorch model and put it in the models directory!".format(str(self.checkpoint_path)))
-       
-        if os.environ.get("DEBUG_GPT2", False):
-            self.checkpoint_path = Path('gpt2')
-            logger.warning("using DEBUG_GPT2 MODE! This is just for devs to quickly check a small GPT2 model with poor output")
-        self.device = torch.device("cuda" if self.dtype==torch.float16 else "cpu")
-        logger.info("Using device={}, checkpoint={}, dtype={}".format(self.device, str(self.checkpoint_path), self.dtype))
-
-        # Load tokenizer and model
-        model_class, tokenizer_class = MODEL_CLASSES["gpt2"]
-        self.tokenizer = tokenizer_class.from_pretrained(str(self.checkpoint_path))
-        self.model = model_class.from_pretrained(str(self.checkpoint_path))
-        self.model.to(self.dtype).to(self.device)
-        self.model.eval()
+        self.max_history_tokens = max_history_tokens or (1024 - generate_num)
+        self.stop_words = stop_words
+        self.MC = model_container or ModelContainer(model_path, device=device, dtype=dtype)
 
     def sample_sequence(
         self, context_tokens=None, top_k=None, top_p=None, repetition_penalty=None, generate_num=None, temperature=None, stop_tokens=None
     ):
-        assert(top_k is not None)
-        assert(temperature is not None)
-        assert(top_p)
-        assert(repetition_penalty)
         generate_num = generate_num if (generate_num is not None) else self.generate_num
         temperature = temperature if (temperature is not None) else self.temp
         top_k = top_k if top_k is not None else self.top_k
@@ -335,9 +340,7 @@ class GPT2Generator:
             for o in out:
                 generated += 1
                 #disabled clean up of spaces, see what effect this has TODO
-                text = self.tokenizer.decode(
-                    o, clean_up_tokenization_spaces=False, skip_special_tokens=True
-                )
+                text = self.tokenizer.decode( o, clean_up_tokenization_spaces=False, skip_special_tokens=True)
                 if self.stop_token:
                     index = text.find(self.stop_token)
                     if index == -1:
