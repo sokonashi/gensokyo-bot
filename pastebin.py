@@ -1,6 +1,7 @@
-from urllib import request
+from urllib import request, error
 import re
 import os
+from utils import *
 from pathlib import Path
 
 fnamesSoFar = {}
@@ -17,7 +18,15 @@ def filename(s):
     return fname2
 
 
-paste = request.urlopen("https://pastebin.com/raw/KD4yN2Gc").read().decode("utf-8")
+try:
+    paste = request.urlopen("https://pastebin.com/raw/KD4yN2Gc").read().decode("utf-8")
+except error.HTTPError as e:
+    if e.code == 404:
+        output("Unable to find pastebin for scraping.", colors["error"])    
+    else:
+        output("Unable to load pastebin for custom prompts. Error code: {}".format(e.code), colors["error"])
+except error.URLError as e:
+    output("Unexpected error while trying to load pastebin prompts! Error code: {}".format(e.code), colors["error"])
 paste = re.sub(r'\nTAGS:.*\n', '\n', paste)
 #pipe is never used in paste so use it as a seperator
 paste = re.sub("=====+", "|", paste)
@@ -28,8 +37,11 @@ for sect in sections[2:][:-1]:
     category = re.search(r"\*\*\*([^\*]+)\*\*\*", sect).group(1)
     category = re.sub(".[pP]rompts?$", "", category)
     category = filename(category)
-    Path("prompts", category).mkdir(exist_ok=True)
-    print(category)
+    try:  
+        Path("prompts", category).mkdir(exist_ok=True)
+        print(category)
+    except IOError:
+        output("Permission error! Unable to create directory for custom prompts.", colors["error"])
     for story in [x for x in filter(None, sect.split("\n\n"))][1:]:
         title = re.search(r"^\(([^\)]+)", story)
         if bool(title):
@@ -38,4 +50,7 @@ for sect in sections[2:][:-1]:
             title = story[:30]
         title = filename(title) + ".txt"
         with Path("prompts", category, title).open("w", encoding="UTF-8") as f:
-            f.write(re.sub(r"^\([^\)]+\)\n", "", story))
+            try:
+                f.write(re.sub(r"^\([^\)]+\)\n", "", story))
+            except IOError:
+                output("Permission error! Unable to write custom prompt to file.", colors["error"])

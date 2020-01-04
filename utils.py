@@ -1,46 +1,291 @@
 # coding: utf-8
 import re
 
-# TODO: try to get rid of this
-from pyjarowinkler import distance
-import torch
-import random
+import textwrap
+import os
+import sys
 
-from getconfig import logger
-
-
-def set_seed(seed):
-    """Sets the seed for all used libraries that take it."""
-    # Make sure you don't use 0 as a seed since some libraries will ignore it.
-    if seed:
-        # np.random.seed(seed)  # not using numpy right now
-        random.seed(a=seed, version=2)
-        torch.manual_seed(seed)
-        if args.n_gpu > 0:
-            torch.cuda.manual_seed_all(seed)
+from getconfig import logger, settings, colors
+from shutil import get_terminal_size
 
 
-def console_print(text, width=75):
-    last_newline = 0
-    i = 0
-    while i < len(text):
-        if text[i] == "\n":
-            last_newline = 0
-        elif last_newline > width and text[i] == " ":
-            text = text[:i] + "\n" + text[i:]
-            last_newline = 0
+def in_colab():
+    """Some terminal codes don't work in a colab notebook."""
+    # from https://github.com/tqdm/tqdm/blob/master/tqdm/autonotebook.py
+    try:
+        from IPython import get_ipython
+        if (not get_ipython()) or ('IPKernelApp' not in get_ipython().config):  # pragma: no cover
+            raise ImportError("console")
+        if 'VSCODE_PID' in os.environ:  # pragma: no cover
+            raise ImportError("vscode")
+    except ImportError:
+        if get_terminal_size()[0]==0 or 'google.colab' in sys.modules:
+            return True
+        return False
+    else:
+        return True
+
+
+def use_ptoolkit():
+    return not in_colab() and not settings.getboolean('colab-mode') and settings.getboolean('prompt-toolkit')
+
+
+IN_COLAB = in_colab() or settings.getboolean('colab-mode')
+
+
+def clear_lines(n):
+    """Clear the last line in the terminal."""
+    if in_colab() or settings.getboolean('colab-mode'):
+        # this wont work in colab etc
+        return
+    screen_code = "\033[1A[\033[2K"  # up one line, and clear line
+    for _ in range(n):
+        print(screen_code, end="\r")
+
+
+if IN_COLAB:
+    logger.warning("Colab mode enabled, disabling line clearing and readline to avoid colab bugs.")
+else:
+    try:
+        if not settings.getboolean('prompt-toolkit'):
+            raise ModuleNotFoundError
+        from inline_editor import edit_multiline
+        from prompt_toolkit import prompt as ptprompt
+        from prompt_toolkit import print_formatted_text
+        from prompt_toolkit.styles import Style
+        from prompt_toolkit.formatted_text import to_formatted_text, HTML
+
+        logger.info(
+            'Python Prompt Toolkit has been imported. This enables a number of editing features but may cause bugs for colab users.')
+    except ModuleNotFoundError:
+        try:
+            import readline
+
+            logger.info(
+                'readline has been imported. This enables a number of editting features but may cause bugs for colab users.')
+        except ModuleNotFoundError:
+            pass
+
+termWidth = get_terminal_size()[0]
+if termWidth < 5:
+    logger.warning("Your detected terminal width is: "+str(get_terminal_size()[0]))
+    termWidth = 999999999
+
+
+def format_result(text):
+    """
+    Formats the result text from the AI to be more human-readable.
+    """
+    text = re.sub("\n{3,}", "<br>", text)
+    text = re.sub("\n", " ", text)
+    text = re.sub("<br>", "\n", text)
+    text = re.sub(" {2,}", " ", text)
+    return text.strip()
+
+
+# ECMA-48 set graphics codes for the curious. Check out "man console_codes"
+def output(text1, col1=None, text2=None, col2=None, wrap=True, beg=None, end='\n', sep=' '):
+    print('', end=beg)
+    ptoolkit = use_ptoolkit()
+    if not ptoolkit:
+        clb1 = "\x1B[{}m".format(col1) if col1 and col1[0].isdigit() else ""
+        clb2 = "\x1B[{}m".format(col2) if col2 and col2[0].isdigit() else ""
+        cle1 = "\x1B[0m" if col1 and col1[0].isdigit() else ""
+        cle2 = "\x1B[0m" if col2 and col2[0].isdigit() else ""
+        text1 = clb1 + text1 + cle1
+        if text2 is not None:
+            text2 = clb2 + text2 + cle2
+    if wrap:
+        width = settings.getint("text-wrap-width")
+        width = 999999999 if width < 2 else width
+        width=min(width, termWidth)
+        text1 = textwrap.fill(
+            text1, width, replace_whitespace=False, drop_whitespace=False
+        )
+        if text2 is not None:
+            if len(text1)+1 >= width:
+                if sep != '\n':
+                    sep += '\n'
+            text2 = textwrap.fill(
+                text2, width, replace_whitespace=False, drop_whitespace=False
+            )
+
+    if ptoolkit:
+        print_formatted_text(to_formatted_text(text1, col1), end='')
+        if text2:
+            print_formatted_text(to_formatted_text(text1, col1), end='')
+            print_formatted_text(to_formatted_text(sep), end='')
+            print_formatted_text(to_formatted_text(text2, col2), end='')
+        print('', end=end)
+    else:
+        if not text2:
+            print(text1, end=end)
         else:
-            last_newline += 1
+            print(text1, end='')
+            print(sep, end='')
+            print(text2, end=end)
+#    return res.count('\n') + 1
+
+
+def input_bool(str, col1=colors["default"], col2=colors["default"], default=False):
+    val = input_line(str, col1, col2).strip().lower()
+    if not val:
+        return default
+    if val[0] == 'y':
+        return True
+    elif val[0] == 'n':
+        return False
+    else:
+        return default
+
+
+def input_line(str, col1=colors["default"], col2=colors["default"]):
+    if use_ptoolkit():
+        val = ptprompt(to_formatted_text(str, col1))
+    else:
+        clb1 = "\x1B[{}m".format(col1) if col1 and col1[0].isdigit() else ""
+        cle1 = "\x1B[0m" if col1 and col1[0].isdigit() else ""
+        val = input(clb1 + str + cle1)
+        print("\x1B[0m", end="")
+    return val
+
+
+def input_number(maxn, default=0):
+    bell()
+    print()
+    val = input_line(
+        "Enter a number from above (default 0):",
+        colors["selection-prompt"],
+        colors["selection-value"],
+    )
+    if not val:
+        return default
+    elif not re.match("^\d+$", val) or 0 > int(val) or int(val) > maxn:
+        output("Invalid choice. ", colors["error"])
+        return input_number(maxn)
+    else:
+        return int(val)
+
+
+def bell():
+    if settings.getboolean("console-bell"):
+        print("\x07", end="")
+
+
+alphabets= "([A-Za-z])"
+prefixes = "(Mr|St|Mrs|Ms|Dr)[.]"
+suffixes = "(Inc|Ltd|Jr|Sr|Co)"
+starters = "(Mr|Mrs|Ms|Dr|He\s|She\s|It\s|They\s|Their\s|Our\s|We\s|But\s|However\s|That\s|This\s|Wherever)"
+acronyms = "([A-Z][.][A-Z][.](?:[A-Z][.])?)"
+websites = "[.](com|ca|gg|tv|co|net|org|io|gov)"
+
+
+def sentence_split(text):
+    """Splits a paragraph of text into a list of sentences within the text."""
+    text = " " + text + "  "
+    text = text.replace("...","<3elp><stop>")
+    text = text.replace("..","<2elp><stop>")
+    text = text.replace("\n"," ")
+    text = re.sub(prefixes,"\\1<prd>",text)
+    text = re.sub(websites,"<prd>\\1",text)
+    if "Ph.D" in text: text = text.replace("Ph.D.","Ph<prd>D<prd>")
+    text = re.sub("\s" + alphabets + "[.] "," \\1<prd> ",text)
+    text = re.sub(acronyms+" "+starters,"\\1<stop> \\2",text)
+    text = re.sub(alphabets + "[.]" + alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>\\3<prd>",text)
+    text = re.sub(alphabets + "[.]" + alphabets + "[.]","\\1<prd>\\2<prd>",text)
+    text = re.sub(" "+suffixes+"[.] "+starters," \\1<stop> \\2",text)
+    text = re.sub(" "+suffixes+"[.]"," \\1<prd>",text)
+    text = re.sub(" " + alphabets + "[.]"," \\1<prd>",text)
+    text = text.replace(".",".<stop>")
+    text = text.replace("?","?<stop>")
+    text = text.replace("!","!<stop>")
+    text = text.replace(".<stop>\"", ".\"<stop>")
+    text = text.replace("?<stop>\"", "?\"<stop>")
+    text = text.replace("!<stop>\"", "!\"<stop>")
+    text = text.replace("<3elp><stop>\"", "<3elp>\"<stop>")
+    text = text.replace("<2elp><stop>\"", "<2elp>\"<stop>")
+    text = text.replace("<prd>",".")
+    text = text.replace("<3elp>","...")
+    text = text.replace("<2elp>","..")
+    sentences = text.split("<stop>")
+    sentences = [s.strip() for s in sentences]
+    if sentences[-1] == "":
+        sentences = sentences[:-1]
+    return sentences
+
+
+def list_items(items, col=colors['menu'], start=0, end=None):
+    """Lists a generic list of items, numbered, starting from the number passed to start. If end is not None,
+    an additional element will be added with its name as the value """
+    i = start
+    for s in items:
+        output(str(i) + ") " + s, col, end='')
         i += 1
-    print(text)
+    if end is not None:
+        output('', end=end)
 
 
-# TODO: get rid if pyjarowinker dependency
-# (AOP) You could use a simpler method, but this has been reported by RebootTech as a much more accurate way to compare strings. It also helps clean up the history. So it will hurt ability to check for looping
-def get_similarity(a, b):
-    if len(a) == 0 or len(b) == 0:
-        return 1
-    return distance.get_jaro_distance(a, b, winkler=True, scaling=0.1)
+def _get_prefix(first_string, second_string):
+    if not first_string or not second_string:
+        return ""
+    if first_string == second_string:
+        return first_string
+    maximum_length = min(len(first_string), len(second_string))
+    for i in range(0, maximum_length):
+        if not first_string[i] == second_string[i]:
+            return first_string[0:i]
+    return first_string[0:maximum_length]
+
+
+def get_similarity(first_string, second_string, scaling=0.1):
+    first_string_length = len(first_string)
+    second_string_length = len(second_string)
+    a_matches = [False] * first_string_length
+    b_matches = [False] * second_string_length
+    matches = 0
+    transpositions = 0
+    jaro_distance = 0.0
+
+    if first_string_length == 0 or second_string_length == 0:
+        return 1.0
+
+    maximum_matching_distance = (max(first_string_length, second_string_length) // 2) - 1
+    if maximum_matching_distance < 0:
+        maximum_matching_distance = 0
+
+    for i in range(first_string_length):
+        start = max(0, i - maximum_matching_distance)
+        end = min(i + maximum_matching_distance + 1, second_string_length)
+        for x in range(start, end):
+            if b_matches[x]:
+                continue
+            if first_string[i] != second_string[x]:
+                continue
+            a_matches[i] = True
+            b_matches[x] = True
+            matches += 1
+            break
+
+    if matches == 0:
+        return 0.0
+
+    k = 0
+    for i in range(first_string_length):
+        if not a_matches[i]:
+            continue
+        while not b_matches[k]:
+            k += 1
+        if first_string[i] != second_string[k]:
+            transpositions += 1
+        k += 1
+
+    jaro_distance = ((matches / first_string_length) +
+                     (matches / second_string_length) +
+                     ((matches - transpositions / 2) / matches)) / 3.0
+    prefix = min(len(_get_prefix(first_string, second_string)), 4)
+
+    # Round to 2 places of percision to match pyjarowinkler formatting
+    return round((jaro_distance + prefix * scaling * (1.0 - jaro_distance)) * 100.0) / 100.0
 
 
 def get_num_options(num):
@@ -87,10 +332,6 @@ def player_won(text):
     return any(re.search(regexp, lower_text) for regexp in won_phrases)
 
 
-def remove_profanity(text):
-    return pf.censor(text)
-
-
 def cut_trailing_quotes(text):
     num_quotes = text.count('"')
     if num_quotes % 2 == 0:
@@ -130,15 +371,12 @@ def cut_trailing_action(text):
 def clean_suggested_action(result_raw, min_length=4):
     result_cleaned = standardize_punctuation(result_raw)
     result_cleaned = cut_trailing_sentence(result_cleaned, allow_action=True)
-
     # The generations actions carry on into the next prompt, so lets remove the prompt
     results = result_cleaned.split("\n")
     results = [s.strip() for s in results]
     results = [s for s in results if len(s) > min_length]
-
     # Sometimes actions are generated with leading > ! . or ?. Likely the model trying to finish the prompt or start an action.
     result = results[0].strip().lstrip(" >!.?") if len(results) else ""
-
     # result = cut_trailing_quotes(result)
     logger.debug(
         "full suggested action '%r'. Cropped: '%r'. Split '%r'",
@@ -146,7 +384,6 @@ def clean_suggested_action(result_raw, min_length=4):
         result,
         results,
     )
-
     # Often actions are cropped with sentance fragments, lets remove. Or we could just turn up config_act["generate-number"]
     result = first_to_second_person(result)
     # Sometimes the suggestion start with "You" we will add that on later anyway so remove it here
@@ -170,22 +407,18 @@ def cut_trailing_sentence(text, allow_action=False):
     last_punc = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
     if last_punc <= 0:
         last_punc = len(text) - 1
-
     et_token = text.find("<")
     if et_token > 0:
         last_punc = min(last_punc, et_token - 1)
     # elif et_token == 0:
     #     last_punc = min(last_punc, et_token)
-
     if allow_action:
         act_token = text.find(">")
         if act_token > 0:
             last_punc = min(last_punc, act_token - 1)
         # elif act_token == 0:
         #     last_punc = min(last_punc, act_token)
-
     text = text[: last_punc + 1]
-
     text = fix_trailing_quotes(text)
     if allow_action:
         text = cut_trailing_action(text)
@@ -194,15 +427,12 @@ def cut_trailing_sentence(text, allow_action=False):
 
 def replace_outside_quotes(text, current_word, repl_word):
     text = standardize_punctuation(text)
-
     reg_expr = re.compile(current_word + '(?=([^"]*"[^"]*")*[^"]*$)')
-
     output = reg_expr.sub(repl_word, text)
     return output
 
 
 def is_first_person(text):
-
     count = 0
     for pair in first_to_second_mappings:
         variations = mapping_variation_pairs(pair)
@@ -256,11 +486,13 @@ def mapping_variation_pairs(mapping):
 
 first_to_second_mappings = [
     ("I'm", "you're"),
+    ("i'm", "you're"),
     ("Im", "you're"),
+    ("im", "you're"),
     ("Ive", "you've"),
+    ("ive", "you've"),
     ("I am", "you are"),
-    ("was I", "were you"),
-    ("am I", "are you"),
+    ("i am", "you are"),
     ("wasn't I", "weren't you"),
     ("I", "you"),
     ("I'd", "you'd"),
@@ -268,12 +500,17 @@ first_to_second_mappings = [
     ("I've", "you've"),
     ("was I", "were you"),
     ("am I", "are you"),
+    ("was i", "were you"),
+    ("am i", "are you"),
     ("wasn't I", "weren't you"),
     ("I", "you"),
-    ("I'd", "you'd"),
     ("i", "you"),
+    ("I'd", "you'd"),
+    ("i'd", "you'd"),
     ("I've", "you've"),
+    ("i've", "you've"),
     ("I was", "you were"),
+    ("i was", "you were"),
     ("my", "your"),
     ("we", "you"),
     ("we're", "you're"),
@@ -282,6 +519,7 @@ first_to_second_mappings = [
     ("us", "you"),
     ("our", "your"),
     ("I'll", "you'll"),
+    ("i'll", "you'll"),
     ("myself", "yourself"),
 ]
 
@@ -326,6 +564,8 @@ def standardize_punctuation(text):
 def first_to_second_person(text):
     text = " " + text
     text = standardize_punctuation(text)
+    if text[-1] not in [".", "?", "!"]:
+        text += "."
     for pair in first_to_second_mappings:
         variations = mapping_variation_pairs(pair)
         for variation in variations:

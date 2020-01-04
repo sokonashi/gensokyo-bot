@@ -5,7 +5,7 @@ from prompt_toolkit.layout.containers import (
     HSplit,
     Window,
 )
-from prompt_toolkit.styles import Style
+from utils import clear_lines
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.widgets import (
@@ -97,8 +97,7 @@ def edit_multiline(default_text=""):
     text_field.buffer.cursor_position = len(text_field.buffer.text)
     text = app.run()
 
-    screen_code = "\033[1A[\033[2K"  # up one line, and clear line
-    print(screen_code, end="\r")
+    clear_lines(1)
 
     return text
 

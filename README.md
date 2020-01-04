@@ -45,9 +45,9 @@ Video walkthrough of Windows install:
 
 To play with GPU acceleration, you need an NVIDA GPU with CUDA installed (and possibly cuDNN, read ahead). The original "XL" 1558M parameter model requires at least 4GB of VRAM. Smaller models may consume much less. On CPU response times vary from 30 to 90 seconds on the XL 1558M model, which is slow but usable.
 
-We have a windows installer which you can find [here](https://github.com/AIDungeonpastes/Clover-Edition-Installer/) or you can manually install by following the instructions below: 
+If you'd like to automatically install and setup the game, there are currently two different Windows installers. You can find a batch installer [here](https://github.com/AIDungeonpastes/Clover-Edition-Installer/releases) and a .exe installer [here](https://github.com/AIDungeonWiXAnon/AID2-Installer-Project/releases), or you can manually install by following the instructions below: 
 
-I should mention a program called [Anaconda](https://docs.anaconda.com/anaconda/install/) that claims to make it easy to install most of this stuff with a few commands in the terminal (although it already is easy to install most this stuff.) Including installing CUDA and cuDNN. Literally no one has tested this yet or created a guide for it. Report if it works. Otherwise:
+I should mention a program called [Anaconda](https://docs.anaconda.com/anaconda/install/) and its little sibling [Miniconda](https://docs.conda.io/en/latest/miniconda.html) that claims to make it easy to install most of this stuff with a few commands in the terminal (although it already is easy to install most this stuff.) Including installing CUDA and cuDNN. It has been tested and shown to work, but nobody has created a guide for it yet. Report if you end up doing so. Otherwise:
 
 First [install python](https://www.python.org/downloads/). Some users reported problems with python 3.8 so start with version 3.7. The installer should install `pip` and it should add it to your `PATH` automatically. Make sure you have the relevant options selected if the installer gives you any options.
 
