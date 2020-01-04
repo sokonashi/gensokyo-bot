@@ -85,6 +85,8 @@ def format_result(text):
 
 # ECMA-48 set graphics codes for the curious. Check out "man console_codes"
 def output(text1, col1=None, text2=None, col2=None, wrap=True, beg=None, end='\n', sep=' '):
+    if not text1:
+        return 0
     print('', end=beg)
     ptoolkit = use_ptoolkit()
     if not ptoolkit:
@@ -102,9 +104,9 @@ def output(text1, col1=None, text2=None, col2=None, wrap=True, beg=None, end='\n
         text1 = textwrap.fill(
             text1, width, replace_whitespace=False, drop_whitespace=False
         )
-        if text2 is not None:
-            if len(text1)+1 >= width:
-                if sep != '\n':
+        if text2:
+            if len(text1)+1+len(text2) >= width:
+                if not re.match("^\n+$", sep):
                     sep += '\n'
             text2 = textwrap.fill(
                 text2, width, replace_whitespace=False, drop_whitespace=False
@@ -113,7 +115,6 @@ def output(text1, col1=None, text2=None, col2=None, wrap=True, beg=None, end='\n
     if ptoolkit:
         print_formatted_text(to_formatted_text(text1, col1), end='')
         if text2:
-            print_formatted_text(to_formatted_text(text1, col1), end='')
             print_formatted_text(to_formatted_text(sep), end='')
             print_formatted_text(to_formatted_text(text2, col2), end='')
         print('', end=end)
@@ -124,7 +125,15 @@ def output(text1, col1=None, text2=None, col2=None, wrap=True, beg=None, end='\n
             print(text1, end='')
             print(sep, end='')
             print(text2, end=end)
-#    return res.count('\n') + 1
+
+    linecount = text1.count('\n') + 1
+    if end:
+        linecount += end.count('\n')
+    if sep:
+        linecount += sep.count('\n')
+    if text2:
+        linecount += text2.count('\n')
+    return linecount
 
 
 def input_bool(str, col1=colors["default"], col2=colors["default"], default=False):

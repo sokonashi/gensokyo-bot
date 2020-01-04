@@ -327,10 +327,10 @@ def play(generator):
             ) as file:
                 output(file.read(), colors["instructions"], wrap=False)
             if use_ptoolkit():
-                output("Prompt>", colors["main-prompt"])
-                prompt = edit_multiline()
                 output("Context>", colors["main-prompt"])
                 context = edit_multiline()
+                output("Prompt>", colors["main-prompt"])
+                prompt = edit_multiline()
             else:
                 context = input_line("Context> ", colors["main-prompt"], colors["user-text"])
                 prompt = input_line("Prompt> ", colors["main-prompt"], colors["user-text"])
