@@ -22,7 +22,6 @@ def edit_multiline(default_text=""):
         """
         Pressing Ctrl-Q, Alt+Enter or Esc + Enter will exit the editor.
         """
-        bottom_bar.style="hidden"
         event.app.exit(text_field.text)
 
     @kb.add('c-c')
@@ -97,6 +96,9 @@ def edit_multiline(default_text=""):
     text_field.text=default_text
     text_field.buffer.cursor_position = len(text_field.buffer.text)
     text = app.run()
+
+    screen_code = "\033[1A[\033[2K"  # up one line, and clear line
+    print(screen_code, end="\r")
 
     return text
 

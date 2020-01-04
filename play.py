@@ -84,7 +84,7 @@ else:
         from prompt_toolkit import prompt as ptprompt
         from prompt_toolkit import print_formatted_text
         from prompt_toolkit.styles import Style
-        from prompt_toolkit.formatted_text import to_formatted_text, HTML, ANSI, FormattedText
+        from prompt_toolkit.formatted_text import to_formatted_text, HTML
         TOOLKIT_ENABLED = True
 
         colors = ptcolors
@@ -125,7 +125,7 @@ def clear_lines(n):
         return
     screen_code = "\033[1A[\033[2K"  # up one line, and clear line
     for _ in range(n):
-        print(screen_code, end="")
+        print(screen_code, end="\r")
 
 
 def getNumberInput(n):
