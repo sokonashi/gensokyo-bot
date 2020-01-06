@@ -14,7 +14,7 @@ from getconfig import config, settings, colors, logger
 #from story.story_manager import *
 from storymanager import Story
 from utils import *
-from gpt2generator import GPT2Generator
+from gpt2generator import ModelContainer
 from interface import instructions
 
 
@@ -126,7 +126,7 @@ def selectFile(p=Path("prompts")):
         return (line1, rest)
 
 
-def getGenerator():
+def getMC():
     colPrint(
         "\nInitializing AI Engine! (This might take a few minutes)\n",
         colors["loading-message"],
@@ -143,14 +143,7 @@ def getGenerator():
     else:
         model=models[0]
         logger.info("Using model: "+str(model))
-    return GPT2Generator(
-        model_path=model,
-        generate_num=settings.getint("generate-num"),
-        temperature=settings.getfloat("temp"),
-        top_k=settings.getint("top-keks"),
-        top_p=settings.getfloat("top-p"),
-        repetition_penalty=settings.getfloat("rep-pen"),
-    )
+    return ModelContainer(model)
 
 
 if not Path("prompts", "Anime").exists():
@@ -281,8 +274,8 @@ def d20ify_action(action, d):
         action = "You " + adjective + " " + action
     return action
 
-def newStory(generator, prompt, context):
-    story = Story(generator, prompt)
+def newStory(MC, prompt, context):
+    story = Story(MC, prompt)
     assert (story.prompt)
     first_result = story.act(context)
     colPrint(prompt, colors['user-text'], end='')
@@ -373,7 +366,7 @@ def alterText(text):
             break
     return " ".join(sentences)
 
-def play(generator):
+def play(MC):
     print("\n")
 
     with open(Path("interface", "mainTitle.txt"), "r", encoding="utf-8") as file:
@@ -428,7 +421,7 @@ def play(generator):
         print()
         colPrint("Generating story...", colors["loading-message"])
 
-        story = newStory(generator, prompt, context)
+        story = newStory(MC, prompt, context)
 
         while True:
             # Generate suggested actions
@@ -484,6 +477,7 @@ def play(generator):
                     ):
                         with open("config.ini", "w", encoding="utf-8") as file:
                             config.write(file)
+                    story.settings()
                 else:
                     colPrint("Invalid Setting", colors["error"])
                     instructions()
@@ -493,7 +487,7 @@ def play(generator):
                 print()
                 colPrint("Restarting story...", colors["loading-message"])
 
-                story = newStory(generator, story.prompt, context)
+                story = newStory(MC, story.prompt, context)
                 continue
             elif action == "/quit":
                 exit()
@@ -508,7 +502,7 @@ def play(generator):
                 if len(story.story) == 1:
                     print()
                     colPrint("Restarting story...", colors["loading-message"])
-                    story = newStory(generator, story.prompt, context)
+                    story = newStory(MC, story.prompt, context)
                     continue
                 else:
                     newaction = story.story[-1][0]
@@ -646,5 +640,5 @@ def play(generator):
 if __name__ == "__main__":
     with open(Path("interface", "clover"), "r", encoding="utf-8") as file:
         print(file.read())
-    generator = getGenerator()
-    play(generator)
+    MC = getMC()
+    play(MC)
