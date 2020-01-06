@@ -34,23 +34,27 @@ def hackyEncode(tokenizer, s):
 def hackyWhiteSpaceCutter(prompt):
    return re.search(r'\s*$', prompt).group(0)
 
+#Should remove trailing spaces but make sure to test this #TODO
+#TODO in fact we can completely fill the AI's memory instead of cutting the first 60 tokens, if we are willing to push the cut context to the front
 def memory_merge(prompt, context, tokenizer, maxHistory=1024):
-        assert(prompt+context)
-        #print(prompt+context)
-        #logger.debug('RAW TEXT INPUT IS:`%r`', context)
-        #the tokenizer is kind of broken for the first input, especially if it includes white space. Same with any trailing white space on the last output.
-        #I'm going with the add prefix option but I'm not sure it's quite right
-        prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False, add_prefix_space=True)
-        context_tokens = hackyEncode(tokenizer, hackyWhiteSpaceCutter(prompt)+context)
-        context_tokens = context_tokens[-(maxHistory-len(prompt_tokens)):]
-        #logger.debug('DECODED CONTEXT TOKENS: `%r`', tokenizer.convert_ids_to_tokens(context_tokens))
-        prompt_tokens.extend(context_tokens)
-        context_tokens = prompt_tokens
-        #logger.debug('DECODED OUTPUT IS: `%r`', tokenizer.decode(context_tokens, clean_up_tokenization_spaces=False))
-        #this is a hack and it should be up to the sampler to deal with max size
-        if len(context_tokens) > maxHistory:
-            logger.error("CONTEXT IS TOO LONG ERROR")
-        return context_tokens
+    assert(prompt+context)
+    #logger.debug('RAW TEXT INPUT IS:`%r`', context)
+    #I'm going with the add prefix option but I'm not sure it's optimal
+    prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False, add_prefix_space=True)
+    context_tokens = hackyEncode(tokenizer, hackyWhiteSpaceCutter(prompt)+context)
+    if len(prompt_tokens) > maxHistory/2.0:
+        logger.warning("More than half of memory is prompt.")
+    if len(prompt_tokens) > maxHistory:
+        logger.error("The prompt is larger than the memory limit.")
+    context_tokens = context_tokens[-(maxHistory-len(prompt_tokens)):]
+    #logger.debug('DECODED CONTEXT TOKENS: `%r`', tokenizer.convert_ids_to_tokens(context_tokens))
+    prompt_tokens.extend(context_tokens)
+    context_tokens = prompt_tokens
+    #logger.debug('DECODED OUTPUT IS: `%r`', tokenizer.decode(context_tokens, clean_up_tokenization_spaces=False))
+    #this is a hack and it should be up to the sampler to deal with max size
+    if len(context_tokens) > maxHistory:
+        logger.error("CONTEXT IS TOO LONG ERROR")
+    return context_tokens
 
 def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float("Inf")):
     """ Filter a distribution of logits using top-k and/or nucleus (top-p) filtering
@@ -100,7 +104,6 @@ def sample_token(logits, genList, repetition_penalty, device):
         tokenInt = token.item()
         selection_tokens.append(tokenInt)
         tokenStr = tokenizer.convert_ids_to_tokens(tokenInt)
-        #print(tokenStr)
         #genList.append(token)
         if tokenStr in penalty_list:
             probs[tokenInt] /= penalty_list[tokenStr]
@@ -114,83 +117,6 @@ def sample_token(logits, genList, repetition_penalty, device):
     return selection_tokens[token_index]
 
 
-#length should be max length, other settings should be removed, device should not be set
-#we could possibly optimize this by having larger batch sizes but it would likely double or more the memory requirements
-def sample_sequence(
-    model,
-    length,
-    context,
-    previousText=None,
-    num_samples=1,
-    temperature=1,
-    top_k=0,
-    top_p=0.9,
-    repetition_penalty=1.0,
-    too_short_penalty=5,
-    min_gen_length=1,
-    device="cpu",
-    stop_tokens=None,
-    tokenizer=None,
-):
-    #can probably remove this now
-    logger.debug('temp: {}    top_k: {}    top_p: {}    rep-pen: {}'.format(temperature, top_k, top_p, repetition_penalty))
-    context = torch.tensor(context, dtype=torch.long, device=device)
-    context = context.unsqueeze(0).repeat(num_samples, 1)
-    generated = context
-    USE_PAST = True
-    next_token = context
-    outputs = None
-    logger.warning("DELET THIS")
-    top_k=1000
-    top_p =0
-    with torch.no_grad():
-        for j in range(length):
-            #why would we ever not use past?
-            if USE_PAST:
-                past = outputs[1] if outputs is not None else None
-                inputs = {"input_ids": next_token, "past": past}
-            else:
-                inputs = {"input_ids": generated}
-
-            outputs = model(
-                **inputs
-            )  # Note: we could also use 'past' with GPT-2/Transfo-XL/XLNet/CTRL (cached hidden-states)
-
-            logits=outputs[0][:, -1, :][0].float()
-            logits = top_k_top_p_filtering(logits, top_k=top_k, top_p=top_p)
-
-            logits = logits/(temperature if temperature > 0 else 1.0)
-
-            shortPen=math.exp(too_short_penalty)
-            if stop_tokens is not None:
-                if j<min_gen_length:
-                    for k in stop_tokens:
-                        logits[stop_token]-=shortPen
-                    
-            genList = generated[0].tolist()
-            if previousText is not None:
-                genList.extend(previousText.tolist())
-            expRepPen = math.exp(repetition_penalty)
-            for k in set(genList):
-                logits[k] -= expRepPen
-
-
-            if temperature == 0:  # greedy sampling:
-                next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
-            else:
-                #token_id=sample_token(logits, genList, repetition_penalty, device)
-                token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
-                next_token = torch.LongTensor([token_index]).to(device).unsqueeze(-1)#.unsqueeze(-1)
-
-            generated = torch.cat((generated, next_token), dim=1)
-            #disabled clean up of spaces, see what effect this has TODO
-            genText = self.tokenizer.decode( o, clean_up_tokenization_spaces=False, skip_special_tokens=True)
-            if re.search(stop_pattern, genText):
-                logger.debug('Stopping Generation Early as stop condition reached')
-                break
-
-    return generated
-
 
 #def truncate_multiple_sequences(seqs, max_len=100):
 #    """Truncate multiple sequences, longest first, removing first."""
@@ -198,12 +124,12 @@ def sample_sequence(
 #        longest = sorted(seqs, key=len, reverse=True)[0]
 #        longest.pop(0)
 
-function strDtype(dtype):
+def strDtype(dtype):
     return re.search('\d+', str(dtype)).group(0)
 
-#this class solves the problem of reusing different models
+#this class solves the problem of reusing the same model with different generators
 class ModelContainer:
-    def __init__(model_path=Path('models', 'pytorch-16BIT-model_v5', device=None, dtype=None):
+    def __init__(self, model_path=Path('models', 'pytorch-16BIT-model_v5'), device=None, dtype=None):
         if device is None:
             if settings.getboolean('force-cpu'):
                 device='cpu'
@@ -230,8 +156,9 @@ class ModelContainer:
 
         self.tokenizer = GPT2Tokenizer.from_pretrained(str(self.checkpoint_path))
         self.model = GPT2LMHeadModel.from_pretrained(str(self.checkpoint_path))
-        if self.model.dtype != self.dtype:
-            logger.warning("Model is {}-bits but you are running at {}-bits. It can be converted in memory fine. But you may benefit from a model that's natively {}-bits.".format(strDtype(self.model.dtype), strDtype(self.dtype), strDtype(self.model.dtype)))
+        modelDtype=next(self.model.parameters()).dtype
+        if modelDtype != self.dtype:
+            logger.warning("Model is {}-bits but you are running at {}-bits. It can be converted in memory fine. But you may benefit from a model that's natively {}-bits.".format(strDtype(modelDtype), strDtype(self.dtype), strDtype(self.dtype)))
         self.model.to(self.dtype).to(self.device)
         self.model.eval()
 
@@ -242,158 +169,91 @@ class GPT2Generator:
         self, model_container=None, model_path=None, generate_num=60, stop_words=['<|endoftext|'], max_history_tokens=1024, temperature=0.4, top_k=0, top_p=0.9, dtype=None, device=None, repetition_penalty=1.05,
     ):
         self.generate_num = generate_num
-        self.temp = temperature
+        self.temperature = temperature
         self.top_k = top_k
         self.top_p = top_p
         self.repetition_penalty = repetition_penalty
         self.max_history_tokens = max_history_tokens or (1024 - generate_num)
         self.stop_words = stop_words
         self.MC = model_container or ModelContainer(model_path, device=device, dtype=dtype)
-
-    def sample_sequence(
-        self, context_tokens=None, top_k=None, top_p=None, repetition_penalty=None, generate_num=None, temperature=None, stop_tokens=None
+        
+    def sample(
+        self,
+        context,
+        prompt='',
+        previousText=None,
     ):
-        generate_num = generate_num if (generate_num is not None) else self.generate_num
-        temperature = temperature if (temperature is not None) else self.temp
-        top_k = top_k if top_k is not None else self.top_k
-        top_p = top_p if top_p is not None else self.top_p
-        repetition_penalty = repetition_penalty if repetition_penalty is not None else self.repetition_penalty
-        out = sample_sequence(
-            model=self.model,
-            context=context_tokens,
-            length=generate_num,
-            # context=self.context,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            repetition_penalty=repetition_penalty,
-            num_samples=self.samples,
-            device=self.device,
-            stop_tokens=stop_tokens,
-            tokenizer=self.tokenizer
-            # batch_size=self.batch_size,
-        )
-        return out
+        context = torch.tensor(context, dtype=torch.long, device=self.MC.device)
+        context = context.unsqueeze(0)
+        generated = context
+        next_token = context
+        outputs = None
+        with torch.no_grad():
+            for j in range(self.generate_num):
+                outputs = self.MC.model(input_ids=next_token, past=outputs[1] if outputs is not None else None)
+    
+                logits=outputs[0][:, -1, :]
+                logits = top_k_top_p_filtering(logits, top_k=self.top_k, top_p=self.top_p)
+                logits = logits[0].float()
+    
+                logits = logits/(self.temperature if self.temperature > 0 else 1.0)
+    
+                #shortPen=math.exp(too_short_penalty)
+                #if stop_tokens is not None:
+                #    if j<min_gen_length:
+                #        for k in stop_tokens:
+                #            logits[stop_token]-=shortPen
+                        
+                genList = generated[0].tolist()
+                if previousText is not None:
+                    genList.extend(previousText.tolist())
+                expRepPen = math.exp(self.repetition_penalty)
+                for k in set(genList):
+                    logits[k] -= expRepPen
+    
+                if self.temperature == 0:  # greedy sampling:
+                    next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
+                else:
+                    #token_id=sample_token(logits, genList, self.repetition_penalty, self.MC.device)
+                    token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
+                    next_token = torch.LongTensor([token_index]).to(self.MC.device).unsqueeze(-1)#.unsqueeze(-1)
+    
+                generated = torch.cat((generated, next_token), dim=1)
+                #disabled clean up of spaces, see what effect this has TODO
+                #genText = self.MC.tokenizer.decode(generated[0], clean_up_tokenization_spaces=False, skip_special_tokens=True)
+                #if re.search(stop_pattern, genText):
+                #    logger.debug('Stopping Generation Early as stop condition reached')
+                #    break
+    
+        return generated[0]
 
-    #def prompt_replace(self, prompt):
-        #if len(prompt) > 0 and prompt[-1] == " ":
-        #    prompt = prompt[:-1]
-
-        # prompt = second_to_first_person(prompt)
-        return prompt
-
-    def result_replace(self, result, allow_action=False):
+    #TODO reenable most of this
+    #def result_replace(self, result, allow_action=False):
         # logger.debug("BEFORE RESULT_REPLACE: `%s`", repr(result))
 
-        result = cut_trailing_sentence(result, allow_action=allow_action)
+        #result = cut_trailing_sentence(result, allow_action=allow_action)
 
-        if len(result) == 0:
-            return ""
-        first_letter_capitalized = result[0].isupper()
-        result = result.replace('."', '".')
-        result = result.replace("#", "")
-        result = result.replace("*", "")
-        #TODO look at this I think blank lines should be fine or blacklisted at generation time
-        result = result.replace("\n\n", "\n")
+        #if len(result) == 0:
+        #    return ""
+        #first_letter_capitalized = result[0].isupper()
+        #result = result.replace('."', '".')
+        #result = result.replace("#", "")
+        #result = result.replace("*", "")
+        #result = result.replace("\n\n", "\n")
         # result = first_to_second_person(result)
 
-        if not first_letter_capitalized:
-            result = result[0].lower() + result[1:]
+        #if not first_letter_capitalized:
+        #    result = result[0].lower() + result[1:]
 
         #this is annoying since we can already see the AIs output
         #logger.debug( "AFTER RESULT_REPLACE: `%r`. allow_action=%r", repr(result), allow_action)
 
-        return result
+        #return result
 
-    def generate_raw(
-            self, context, prompt='', generate_num=None, temperature=None, top_k=None, top_p=None, repetition_penalty=None, stop_tokens=None
-    ):
-        assert(top_k is not None)
-        assert(temperature is not None)
-        assert(top_p)
-        assert(repetition_penalty)
             
-        context_tokens=memory_merge(prompt, context, self.tokenizer, self.max_history_tokens)
-
-
-        # if os.environ.get("DEBUG_GPT2", False):
-        logger.debug(
-            "Text passing into model `%r`",
-            self.tokenizer.decode(
-                context_tokens,
-                clean_up_tokenization_spaces=True,
-                #skip_special_tokens=True,
-            ),
-        ) 
-        generated = 0
-        for _ in range(self.samples // self.batch_size):
-            out = self.sample_sequence(
-                context_tokens,
-                generate_num=generate_num,
-                temperature=temperature,
-                top_k=top_k,
-                top_p=top_p,
-                repetition_penalty=repetition_penalty,
-                stop_tokens=stop_tokens,
-            )
-            out = out[:, len(context_tokens) :].tolist()
-            for o in out:
-                generated += 1
-                #disabled clean up of spaces, see what effect this has TODO
-                text = self.tokenizer.decode( o, clean_up_tokenization_spaces=False, skip_special_tokens=True)
-                if self.stop_token:
-                    index = text.find(self.stop_token)
-                    if index == -1:
-                        index = None
-                    text = text[:index]
-                if stop_tokens is not None:
-                    for stop_token in stop_tokens:
-                        index = text.find(self.stop_token)
-                        if index == -1:
-                            index = None
-                        text = text[:index]
-        return text
-
-    def generate(self, context, prompt='', temperature=None, top_p=None, top_k=None, repetition_penalty=None, depth=0):
-        assert(top_k is not None)
-        assert(temperature is not None)
-        assert(top_p)
-        assert(repetition_penalty)
-        #logger.debug("BEFORE PROMPT_REPLACE: `%r`", prompt)
-
-        #prompt = [self.prompt_replace(p) for p in prompt]
-
-        # logger.debug("AFTER PROMPT_REPLACE is: `%r`", repr(prompt))
-        assert(prompt+context)
-
-        text = self.generate_raw(
-            context, prompt, temperature=temperature, top_k=top_k, top_p=top_p, repetition_penalty=repetition_penalty, stop_tokens=self.tokenizer.encode(["<|endoftext|>", ">"])
-        )
-
-        logger.debug("Generated result is: `%r`", repr(text))
-
-        result = self.result_replace(text)
-
-        if (depth > 6) and len(result) == 0:
-            # Sometimes it keeps generating a story startng with an action (">"), if it's tried a few times and it keeps
-            # happening, lets let it keep action text which starts in ">"
-            # We could just blacklist that token and force it to generate something else. TODO
-            result = self.result_replace(text, allow_action=True)
-            logger.info(
-                "Model generated empty text after formatting `%r`. Trying to format less with allow_action=True. `%r`",
-                text,
-                result,
-            )
-
-            #same here as above
-        if len(result) == 0:
-            if depth < 20:
-                logger.info("Model generated empty text trying again %r", depth)
-                return self.generate(
-                    prompt, context, temperature=temperature, top_p=top_p, top_k=top_k, repetition_penalty=repetition_penalty, depth=depth + 1
-                )
-            else:
-                logger.warn(
-                    "Model generated empty text %r times. Try another action", depth
-                )
-        return result
+    def generate(self, context, prompt=''):
+        context_tokens=memory_merge(prompt, context, self.MC.tokenizer, self.max_history_tokens)
+        logger.debug( "Text passing into model `%r`", self.MC.tokenizer.decode(context_tokens))
+        out = self.sample(context_tokens,).tolist() #[:, len(context_tokens) :].tolist()
+        #disabled clean up of spaces, see what effect this has TODO
+        return self.MC.tokenizer.decode(out, clean_up_tokenization_spaces=False, skip_special_tokens=False)
