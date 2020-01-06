@@ -166,7 +166,7 @@ class ModelContainer:
 
 class GPT2Generator:
     def __init__(
-        self, model_container=None, model_path=None, generate_num=60, stop_words=['<|endoftext|>'], max_history_tokens=1024, temperature=0.4, top_k=0, top_p=0.9, dtype=None, device=None, repetition_penalty=1.05,
+        self, model_container=None, model_path=None, generate_num=60, stop_patterns=[r'\<\|endoftext\|\>'], max_history_tokens=None, temperature=0.4, top_k=0, top_p=0.9, numBeams=2, dtype=None, device=None, repetition_penalty=1.05,
     ):
         self.generate_num = generate_num
         self.temperature = temperature
@@ -174,32 +174,45 @@ class GPT2Generator:
         self.top_p = top_p
         self.repetition_penalty = repetition_penalty
         self.max_history_tokens = max_history_tokens or (1024 - generate_num)
-        self.stop_words = stop_words
+        self.numBeams = numBeams
+        self.stop_patterns = stop_patterns
         self.MC = model_container or ModelContainer(model_path, device=device, dtype=dtype)
-        
+
+    def beamSearch(self, context, numBeams, beamDepth, previousText=[]):
+        while true:
+            genTexts = []
+            logProbs = []
+            for i in range(numBeams):
+                genText[i], logProb=self.sample(context, previousText)
+
+
     def sample(
         self,
         context,
-        prompt='',
-        previousText=None,
+        length,
+        previousText=None
     ):
         context = torch.tensor(context, dtype=torch.long, device=self.MC.device)
         context = context.unsqueeze(0)
-        generated = context
+        #generated = context
         next_token = context
         outputs = None
-        output = []
+        genTokens = []
+        logProb = 0
+        #with torch.no_grad():
+        #    print(self.MC.model(input_ids=next_token, past=None))
         with torch.no_grad():
-            for j in range(self.generate_num):
+            for j in range(length):
                 outputs = self.MC.model(input_ids=next_token, past=outputs[1] if outputs is not None else None)
-    
                 logits=outputs[0][:, -1, :]
+                origLogits = logits[0].float().clone().detach()
                 logits = top_k_top_p_filtering(logits, top_k=self.top_k, top_p=self.top_p)
                 logits = logits[0].float()
     
                 logits = logits/(self.temperature if self.temperature > 0 else 1.0)
     
-                genList = generated[0].tolist()
+                #genList = generated[0].tolist()
+                genList = genTokens.copy()
                 if previousText is not None:
                     genList.extend(previousText.tolist())
                 expRepPen = math.exp(self.repetition_penalty)
@@ -207,21 +220,27 @@ class GPT2Generator:
                     logits[k] -= expRepPen
     
                 if self.temperature == 0:  # greedy sampling:
-                    next_token = torch.argmax(logits, dim=-1).unsqueeze(-1)
+                    token_index = torch.argmax(logits, dim=-1).item()
                 else:
                     #token_id=sample_token(logits, genList, self.repetition_penalty, self.MC.device)
                     token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
-                    next_token = torch.LongTensor([token_index]).to(self.MC.device).unsqueeze(-1)#.unsqueeze(-1)
+                
+                next_token = torch.LongTensor([token_index]).to(self.MC.device).unsqueeze(-1)#.unsqueeze(-1)
     
-                output.append(next_token)
-                generated = torch.cat((generated, next_token), dim=1)
+                logProb += origLogits[token_index]
+                genTokens.append(token_index)
                 #disabled clean up of spaces, see what effect this has TODO
-                #genText = self.MC.tokenizer.decode(generated[0], clean_up_tokenization_spaces=False, skip_special_tokens=True)
-                #if re.search(stop_pattern, genText):
-                #    logger.debug('Stopping Generation Early as stop condition reached')
-                #    break
-    
-        return output
+                genText = self.MC.tokenizer.decode(genTokens, clean_up_tokenization_spaces=False, skip_special_tokens=False)
+                stopped = False
+                for p in self.stop_patterns:
+                    if re.search(p, genText):
+                        logger.debug('Stopping Generation Early as stop condition reached')
+                        stopped = True
+                        break
+                if stopped:
+                    break
+
+        return genTokens, logProb
 
     #TODO reenable most of this
     #def result_replace(self, result, allow_action=False):
@@ -250,7 +269,7 @@ class GPT2Generator:
     def generate(self, context, prompt=''):
         context_tokens=memory_merge(prompt, context, self.MC.tokenizer, self.max_history_tokens)
         logger.debug( "Text passing into model `%r`", self.MC.tokenizer.decode(context_tokens))
-        out = self.sample(context_tokens)
+        out, logP = self.sample(context_tokens, self.generate_num)
         #disabled clean up of spaces, see what effect this has TODO
         logger.debug( "Generated Result: `%r`", self.MC.tokenizer.decode(out))
         return self.MC.tokenizer.decode(out, clean_up_tokenization_spaces=False, skip_special_tokens=False)

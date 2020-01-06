@@ -11,8 +11,8 @@ class Story:
         self.story = []
         self.longTermMemory = []
         self.prompt = prompt
-        self.storyGen = GPT2Generator(MC)
-        self.sugGen = GPT2Generator(MC)
+        self.storyGen = GPT2Generator(MC, stop_patterns=[r'\n>'])
+        self.sugGen = GPT2Generator(MC, stop_patterns=[r'\n'])
         self.settings()
 
     def settings(self):
@@ -33,7 +33,9 @@ class Story:
         results=[]
         for i in range(self.numResults):
             assert(settings.getint('top-keks') is not None)
-            results.append(self.storyGen.generate(self.getStory()+action, self.prompt))
+            result=self.storyGen.generate(self.getStory()+action, self.prompt)
+            result = re.sub('\n+>.*', '', result)
+            results.append(result)
             
         self.story.append([action, results])
         return results
