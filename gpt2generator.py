@@ -166,7 +166,7 @@ class ModelContainer:
 
 class GPT2Generator:
     def __init__(
-        self, model_container=None, model_path=None, generate_num=60, stop_words=['<|endoftext|'], max_history_tokens=1024, temperature=0.4, top_k=0, top_p=0.9, dtype=None, device=None, repetition_penalty=1.05,
+        self, model_container=None, model_path=None, generate_num=60, stop_words=['<|endoftext|>'], max_history_tokens=1024, temperature=0.4, top_k=0, top_p=0.9, dtype=None, device=None, repetition_penalty=1.05,
     ):
         self.generate_num = generate_num
         self.temperature = temperature
@@ -188,6 +188,7 @@ class GPT2Generator:
         generated = context
         next_token = context
         outputs = None
+        output = []
         with torch.no_grad():
             for j in range(self.generate_num):
                 outputs = self.MC.model(input_ids=next_token, past=outputs[1] if outputs is not None else None)
@@ -198,12 +199,6 @@ class GPT2Generator:
     
                 logits = logits/(self.temperature if self.temperature > 0 else 1.0)
     
-                #shortPen=math.exp(too_short_penalty)
-                #if stop_tokens is not None:
-                #    if j<min_gen_length:
-                #        for k in stop_tokens:
-                #            logits[stop_token]-=shortPen
-                        
                 genList = generated[0].tolist()
                 if previousText is not None:
                     genList.extend(previousText.tolist())
@@ -218,6 +213,7 @@ class GPT2Generator:
                     token_index = torch.multinomial(F.softmax(logits, dim=-1), num_samples=1).item()
                     next_token = torch.LongTensor([token_index]).to(self.MC.device).unsqueeze(-1)#.unsqueeze(-1)
     
+                output.append(next_token)
                 generated = torch.cat((generated, next_token), dim=1)
                 #disabled clean up of spaces, see what effect this has TODO
                 #genText = self.MC.tokenizer.decode(generated[0], clean_up_tokenization_spaces=False, skip_special_tokens=True)
@@ -225,7 +221,7 @@ class GPT2Generator:
                 #    logger.debug('Stopping Generation Early as stop condition reached')
                 #    break
     
-        return generated[0]
+        return output
 
     #TODO reenable most of this
     #def result_replace(self, result, allow_action=False):
@@ -254,6 +250,7 @@ class GPT2Generator:
     def generate(self, context, prompt=''):
         context_tokens=memory_merge(prompt, context, self.MC.tokenizer, self.max_history_tokens)
         logger.debug( "Text passing into model `%r`", self.MC.tokenizer.decode(context_tokens))
-        out = self.sample(context_tokens,).tolist() #[:, len(context_tokens) :].tolist()
+        out = self.sample(context_tokens)
         #disabled clean up of spaces, see what effect this has TODO
+        logger.debug( "Generated Result: `%r`", self.MC.tokenizer.decode(out))
         return self.MC.tokenizer.decode(out, clean_up_tokenization_spaces=False, skip_special_tokens=False)
