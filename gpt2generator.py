@@ -166,7 +166,7 @@ class ModelContainer:
 
 class GPT2Generator:
     def __init__(
-        self, model_container=None, model_path=None, generate_num=60, stop_patterns=[r'\<\|endoftext\|\>'], max_history_tokens=None, temperature=0.4, top_k=0, top_p=0.9, numBeams=2, dtype=None, device=None, repetition_penalty=1.05,
+        self, model_container=None, model_path=None, generate_num=60, stop_patterns=[r'\<\|endoftext\|\>'], max_history_tokens=None, temperature=0.4, top_k=0, top_p=0.9, numBeams=2, wordPenalties=None, dtype=None, device=None, repetition_penalty=1.05,
     ):
         self.generate_num = generate_num
         self.temperature = temperature
@@ -177,6 +177,19 @@ class GPT2Generator:
         self.numBeams = numBeams
         self.stop_patterns = stop_patterns
         self.MC = model_container or ModelContainer(model_path, device=device, dtype=dtype)
+        self.wordPenalties=None
+        if wordPenalties is not None:
+            setWordPenalties(wordPenalties)
+
+    def setWordPenalties(self, wordPenalties):
+        self.wordPenalties = torch.zeros(len(self.MC.tokenizer.encoder), device=self.MC.device)
+        for regex in wordPenalties:
+            for k in self.MC.tokenizer.encoder:
+                if re.search(regex, k, re.IGNORECASE):
+                    weight = float(wordPenalties[regex])/math.log2(math.e)
+                    self.wordPenalties[self.MC.tokenizer.encoder[k]]=weight
+                    #disable this as it will be annoying
+                    logger.info('Token {} matched {}, giving weight e^{}'.format(repr(k), repr(regex), weight))
 
     def beamSearch(self, context, numBeams, beamDepth, previousText=[]):
         while true:
@@ -210,6 +223,9 @@ class GPT2Generator:
                 logits = logits[0].float()
     
                 logits = logits/(self.temperature if self.temperature > 0 else 1.0)
+
+                if self.wordPenalties is not None:
+                    logits-=self.wordPenalties
     
                 #genList = generated[0].tolist()
                 genList = genTokens.copy()
@@ -242,7 +258,8 @@ class GPT2Generator:
 
         return genTokens, logProb
 
-    #TODO reenable most of this
+    #TODO test reenable some of this
+    # The details of what needs to be cleaned up are model and training data dependent
     #def result_replace(self, result, allow_action=False):
         # logger.debug("BEFORE RESULT_REPLACE: `%s`", repr(result))
 

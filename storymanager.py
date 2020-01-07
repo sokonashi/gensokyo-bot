@@ -2,6 +2,9 @@ import re
 from getconfig import settings
 from gpt2generator import GPT2Generator
 
+from pathlib import Path
+import json
+
 #The game interface code should be kept seperate from the story class
 class Story:
     #the initial prompt is very special.
@@ -14,6 +17,12 @@ class Story:
         self.storyGen = GPT2Generator(MC, stop_patterns=[r'\n>'])
         self.sugGen = GPT2Generator(MC, stop_patterns=[r'\n'])
         self.settings()
+
+        wordPenFile=Path('word-penalties.json')
+        if wordPenFile.exists():
+            with wordPenFile.open() as f:
+                self.storyGen.setWordPenalties(json.loads(f.read()))
+
 
     def settings(self):
         self.storyGen.temperature = settings.getfloat('temp')
