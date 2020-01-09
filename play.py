@@ -621,11 +621,13 @@ def play(MC):
                 if player_won(result):
                     colPrint(result + "\n CONGRATS YOU WIN", colors["message"])
                     break
-                elif player_died(result):
+                #elif player_died(result):
+                #TODO replace this with a better search so that THE END does not end up in the results in case the player continues
+                elif re.search('THE END', result) is not None:
                     colPrint(result, colors["ai-text"])
-                    colPrint("YOU DIED. GAME OVER", colors["error"])
+                    colPrint("GAME OVER", colors["error"])
                     colPrint(
-                        "\nOptions:\n0)Start a new game\n1)\"I'm not dead yet!\" (If you didn't actually die)",
+                        "\nOptions:\n0)Start a new game\n1)Continue this story anyway.",
                         colors["menu"],
                     )
                     choice = getNumberInput(1)

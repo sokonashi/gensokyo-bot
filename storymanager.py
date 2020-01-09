@@ -43,7 +43,9 @@ class Story:
         for i in range(self.numResults):
             assert(settings.getint('top-keks') is not None)
             result=self.storyGen.generate(self.getStory()+action, self.prompt)
-            result = re.sub('\n+>.*', '', result)
+            result = re.sub('\n+>.*', '', result, flags=re.DOTALL)
+            result = re.sub(r'\<\|endoftext\|\>.*$', 'THE END', result, flags=re.DOTALL)
+            result = re.sub(r"[a-zA-Z '\-\(]+$", '', result)
             results.append(result)
             
         self.story.append([action, results])
