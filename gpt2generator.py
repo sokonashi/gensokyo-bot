@@ -217,12 +217,9 @@ class GPT2Generator:
         with torch.no_grad():
             for j in range(length):
                 outputs = self.MC.model(input_ids=next_token, past=outputs[1] if outputs is not None else None)
-                logits=outputs[0][:, -1, :]
-                origLogits = logits[0].float().clone().detach()
-                logits = top_k_top_p_filtering(logits, top_k=self.top_k, top_p=self.top_p)
-                logits = logits[0].float()
-    
-                logits = logits/(self.temperature if self.temperature > 0 else 1.0)
+                logits=outputs[0][:, -1, :][0].float()
+                logits -= torch.logsumexp(logits, 0)
+                origLogits = logits.clone().detach()
 
                 if self.wordPenalties is not None:
                     logits-=self.wordPenalties
@@ -234,6 +231,10 @@ class GPT2Generator:
                 expRepPen = math.exp(self.repetition_penalty)
                 for k in set(genList):
                     logits[k] -= expRepPen
+
+                logits = top_k_top_p_filtering(logits.unsqueeze(0), top_k=self.top_k, top_p=self.top_p)[0]
+    
+                logits = logits*self.temperature/(self.temperature if self.temperature > 0 else 1.0)
     
                 if self.temperature == 0:  # greedy sampling:
                     token_index = torch.argmax(logits, dim=-1).item()
