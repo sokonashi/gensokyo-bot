@@ -234,7 +234,7 @@ class GPT2Generator:
 
                 logits = top_k_top_p_filtering(logits.unsqueeze(0), top_k=self.top_k, top_p=self.top_p)[0]
     
-                logits = logits*self.temperature/(self.temperature if self.temperature > 0 else 1.0)
+                logits = logits/(self.temperature if self.temperature > 0 else 1.0)
     
                 if self.temperature == 0:  # greedy sampling:
                     token_index = torch.argmax(logits, dim=-1).item()
@@ -289,5 +289,6 @@ class GPT2Generator:
         logger.debug( "Text passing into model `%r`", self.MC.tokenizer.decode(context_tokens))
         out, logP = self.sample(context_tokens, self.generate_num)
         #disabled clean up of spaces, see what effect this has TODO
+        #logger.debug("Raw Generated Tokens: %r", self.MC.tokenizer.convert_ids_to_tokens(out))
         logger.debug( "Generated Result: `%r`", self.MC.tokenizer.decode(out))
         return self.MC.tokenizer.decode(out, clean_up_tokenization_spaces=False, skip_special_tokens=False)
