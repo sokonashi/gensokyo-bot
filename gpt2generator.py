@@ -43,9 +43,9 @@ def memory_merge(prompt, context, tokenizer, maxHistory=1024):
     prompt_tokens = tokenizer.encode(prompt, add_special_tokens=False, add_prefix_space=True)
     context_tokens = hackyEncode(tokenizer, hackyWhiteSpaceCutter(prompt)+context)
     if len(prompt_tokens) > maxHistory/2.0:
-        logger.warning("More than half of memory is prompt.")
-    if len(prompt_tokens) > maxHistory:
-        logger.error("The prompt is larger than the memory limit.")
+        logger.warning("More than {}% of memory is being taken up by long term memory (the prompt).".format(int(len(prompt_tokens)/maxHistory*100)))
+    if len(prompt_tokens) >= maxHistory:
+        raise MemoryError("The prompt is larger than the memory limit.")
     context_tokens = context_tokens[-(maxHistory-len(prompt_tokens)):]
     #logger.debug('DECODED CONTEXT TOKENS: `%r`', tokenizer.convert_ids_to_tokens(context_tokens))
     prompt_tokens.extend(context_tokens)
@@ -53,7 +53,7 @@ def memory_merge(prompt, context, tokenizer, maxHistory=1024):
     #logger.debug('DECODED OUTPUT IS: `%r`', tokenizer.decode(context_tokens, clean_up_tokenization_spaces=False))
     #this is a hack and it should be up to the sampler to deal with max size
     if len(context_tokens) > maxHistory:
-        logger.error("CONTEXT IS TOO LONG ERROR")
+        raise MemoryError('Prompt and context are too long: {} tokens. Must be less than about 1023 minus "generate-num" words.'.format(len(context_tokens)))
     return context_tokens
 
 def top_k_top_p_filtering(logits, top_k=0, top_p=0.0, filter_value=-float("Inf")):
@@ -110,7 +110,6 @@ def sample_token(logits, genList, repetition_penalty, device):
             selection_logits -= math.log(penalty_list[tokenStr])
             del penalty_list[tokenStr]
 
-        #print(tokenizer.decode(genList))
         #genList.pop()
 
     token_index = torch.multinomial(F.softmax(selection_logits, dim=-1), num_samples=1).item()
@@ -173,7 +172,8 @@ class GPT2Generator:
         self.top_k = top_k
         self.top_p = top_p
         self.repetition_penalty = repetition_penalty
-        self.max_history_tokens = max_history_tokens or (1024 - generate_num)
+        #not sure where the plus one comes from
+        self.max_history_tokens = max_history_tokens or (1024 - generate_num+1)
         self.numBeams = numBeams
         self.stop_patterns = stop_patterns
         self.MC = model_container or ModelContainer(model_path, device=device, dtype=dtype)
@@ -212,8 +212,6 @@ class GPT2Generator:
         outputs = None
         genTokens = []
         logProb = 0
-        #with torch.no_grad():
-        #    print(self.MC.model(input_ids=next_token, past=None))
         with torch.no_grad():
             for j in range(length):
                 outputs = self.MC.model(input_ids=next_token, past=outputs[1] if outputs is not None else None)
