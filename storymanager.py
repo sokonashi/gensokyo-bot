@@ -9,8 +9,7 @@ import json
 class Story:
     #the initial prompt is very special.
     #We want it to be permanently in the AI's limited memory (as well as possibly other strings of text.)
-    def __init__(self, MC, prompt='', numResults=1):
-        self.numResults=numResults
+    def __init__(self, MC, prompt=''):
         self.story = []
         self.longTermMemory = []
         self.prompt = prompt
@@ -40,7 +39,7 @@ class Story:
     def act(self, action):
         assert(self.prompt+action)
         results=[]
-        for i in range(self.numResults):
+        for i in range(settings.getint('num-results')):
             assert(settings.getint('top-keks') is not None)
             result=self.storyGen.generate(self.getStory()+action, self.prompt)
             result = re.sub('\n+>.*', '', result, flags=re.DOTALL)
@@ -51,13 +50,12 @@ class Story:
         self.story.append([action, results])
         return results
 
-    #only relevant when multiple results are supported
-    #this will be added in the future, don't remove it
     #chosen result is always placed first, simplifies many things
     def chooseResult(self, num):
-       results=self.story[1] 
+       results=self.story[-1][1] 
        best=results.pop(num)
        results.insert(0,best)
+       return best
 
     #Results 
     def getStory(self):

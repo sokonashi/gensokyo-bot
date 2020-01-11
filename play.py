@@ -65,7 +65,7 @@ if termWidth < 5:
     termWidth = 999999999
 
 # ECMA-48 set graphics codes for the curious. Check out "man console_codes"
-def colPrint(text, col="0", wrap=True, end=None):
+def colPrint(text, col="0", wrap=True, end='\n'):
     if wrap:
         width = settings.getint("text-wrap-width")
         width = 999999999 if width < 2 else width
@@ -73,8 +73,10 @@ def colPrint(text, col="0", wrap=True, end=None):
         text = textwrap.fill(
             text, width, replace_whitespace=False
         )
-    print("\x1B[{}m{}\x1B[{}m".format(col, text, colors["default"]), end=end)
-    return text.count('\n')+1
+    print("\x1B[{}m{}\x1B[{}m{}".format(col, text, colors["default"], end), end='')
+    colPrintLines = text.count('\n')
+    #print("LINES PRINTED: {}".format(colPrintLines))
+    return colPrintLines
 
 
 def colInput(str, col1=colors["default"], col2=colors["default"]):
@@ -89,6 +91,8 @@ def clear_lines(n):
         # this wont work in colab etc
         return
     screen_code = "\033[1A[\033[2K"  # up one line, and clear line
+    screen_code+='\r' # I think this fixes a bug with white space appearing at beginning of line
+    #print("CLEAR {} LINES".format(n))
     for _ in range(n):
         print(screen_code, end="")
 
@@ -277,10 +281,16 @@ def d20ify_action(action, d):
 def newStory(MC, prompt, context):
     story = Story(MC, prompt)
     assert (story.prompt)
-    first_result = story.act(context)
+    numLines=colPrint(prompt, colors['user-text'])
+    numLines+=colPrint(context, colors['user-text'])
+    print()
+    numLines+=1
+    first_result = getResult(context, story)
+    clear_lines(numLines)
+    #TODO fix line wrapping with end=''
     colPrint(prompt, colors['user-text'], end='')
     colPrint(context, colors['user-text'], end='')
-    colPrint(first_result[0], colors['ai-text'], end='')
+    colPrint(first_result, colors['ai-text'])
     print("\n\n")
     return story
 
@@ -366,6 +376,22 @@ def alterText(text):
             break
     return " ".join(sentences)
 
+def getResult(action, story):
+    results = story.act(action)
+    print()
+    numResultLines=1
+    numResultLines += colPrint(('\n'+'='*min(10, get_terminal_size()[0])+'\n').join(results), colors["ai-text"])
+    numResultLines+=1
+    print()
+    if settings.getint('num-results') > 1:
+        numResultLines+=colPrint('Pick the best result from 0 to {}'.format(settings.getint('num-results')-1), colors['message'])
+        result = story.chooseResult(getNumberInput(settings.getint('num-results')-1))
+        numResultLines+=1
+        clear_lines(numResultLines)
+    else:
+        result = results[0]
+    return result
+
 def play(MC):
     print("\n")
 
@@ -439,7 +465,7 @@ def play(MC):
                         suggested_actions.append(suggested_action)
                         suggestion = "{}> {}".format(j, suggested_action)
                         action_suggestion_lines += colPrint(suggestion, colors["selection-value"])
-                print()
+                #print()
 
             bell()
             action = colInput("> You ", colors["main-prompt"], colors["user-text"])
@@ -509,7 +535,7 @@ def play(MC):
 
                 colPrint(newaction, colors['user-text'], end='')
                 story.story=story.story[:-1]
-                result = "\n" + story.act(newaction)[0]
+                result = "\n" + getResult(newaction, story)
 
                 if len(story.story) >= 2:
                     similarity = get_similarity(result, story.story[-2][1][0])
@@ -604,11 +630,10 @@ def play(MC):
                     "\n>" + action.lstrip().lstrip("> \n"),
                     colors["transformed-user-text"],
                 )
-                #TODO check if leading white space makes sense
-                result = "\n" + story.act(action)[0]
+                result = getResult(action, story)
+                colPrint(result, colors['ai-text'])
 
-                #TODO: Replace all this nonsense
-                if len(story.story) >= 2:
+                if len(story.story) >= 2 and settings.getint('num-results') < 2:
                     similarity = get_similarity(result, story.story[-2][1][0])
                     if similarity > 0.9:
                         story.story = story.story[:-1]

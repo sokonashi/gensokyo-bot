@@ -157,7 +157,7 @@ class ModelContainer:
         self.model = GPT2LMHeadModel.from_pretrained(str(self.checkpoint_path))
         modelDtype=next(self.model.parameters()).dtype
         if modelDtype != self.dtype:
-            logger.warning("Model is {}-bits but you are running at {}-bits. It can be converted in memory fine. But you may benefit from a model that's natively {}-bits.".format(strDtype(modelDtype), strDtype(self.dtype), strDtype(self.dtype)))
+            logger.debug("Model is loaded into memory at {}-bits but you are running at {}-bits. It can be converted in memory.".format(strDtype(modelDtype), strDtype(self.dtype), strDtype(self.dtype)))
         self.model.to(self.dtype).to(self.device)
         self.model.eval()
 
@@ -189,7 +189,7 @@ class GPT2Generator:
                     weight = float(wordPenalties[regex])/math.log2(math.e)
                     self.wordPenalties[self.MC.tokenizer.encoder[k]]=weight
                     #disable this as it will be annoying
-                    logger.info('Token {} matched {}, giving weight e^{}'.format(repr(k), repr(regex), weight))
+                    logger.debug('Token {} matched {}, giving weight e^{}'.format(repr(k), repr(regex), weight))
 
     def beamSearch(self, context, numBeams, beamDepth, previousText=[]):
         while true:
