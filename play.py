@@ -65,7 +65,7 @@ if termWidth < 5:
     termWidth = 999999999
 
 # ECMA-48 set graphics codes for the curious. Check out "man console_codes"
-def colPrint(text, col="0", wrap=True, end='\n'):
+def colPrint(text='', col="0", wrap=True, end='\n'):
     if wrap:
         width = settings.getint("text-wrap-width")
         width = 999999999 if width < 2 else width
@@ -74,7 +74,7 @@ def colPrint(text, col="0", wrap=True, end='\n'):
             text, width, replace_whitespace=False
         )
     print("\x1B[{}m{}\x1B[{}m{}".format(col, text, colors["default"], end), end='')
-    colPrintLines = text.count('\n')
+    colPrintLines = (text+end).count('\n')
     #print("LINES PRINTED: {}".format(colPrintLines))
     return colPrintLines
 
@@ -92,7 +92,7 @@ def clear_lines(n):
         return
     screen_code = "\033[1A[\033[2K"  # up one line, and clear line
     screen_code+='\r' # I think this fixes a bug with white space appearing at beginning of line
-    #print("CLEAR {} LINES".format(n))
+    print("CLEAR {} LINES".format(n))
     for _ in range(n):
         print(screen_code, end="")
 
@@ -378,11 +378,9 @@ def alterText(text):
 
 def getResult(action, story):
     results = story.act(action)
-    print()
-    numResultLines=1
+    numResultLines=colPrint()
     numResultLines += colPrint(('\n'+'='*min(10, get_terminal_size()[0])+'\n').join(results), colors["ai-text"])
-    numResultLines+=1
-    print()
+    numResultLines+=colPrint()
     if settings.getint('num-results') > 1:
         numResultLines+=colPrint('Pick the best result from 0 to {}'.format(settings.getint('num-results')-1), colors['message'])
         result = story.chooseResult(getNumberInput(settings.getint('num-results')-1))
@@ -631,7 +629,6 @@ def play(MC):
                     colors["transformed-user-text"],
                 )
                 result = getResult(action, story)
-                colPrint(result, colors['ai-text'])
 
                 if len(story.story) >= 2 and settings.getint('num-results') < 2:
                     similarity = get_similarity(result, story.story[-2][1][0])
