@@ -1,0 +1,8 @@
+{
+    "pass": "password",
+    "temp": 0.25,
+    "top_p": 0.9,
+    "rep_pen": 1.4,
+    "prompt": "You are on the moon.",
+    "context": "You are sitting on your bunk when suddenly your commanding officer comes up to you and says: \"Sir! Sir!\" \n\nYou look at him in confusion."
+}
