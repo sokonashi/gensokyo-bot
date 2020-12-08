@@ -758,8 +758,8 @@ class GameManager:
 
 # This is here for rapid development, without reloading the model. You import play into a jupyternotebook with autoreload
 if __name__ == "__main__":
-    with open(Path("interface", "clover"), "r", encoding="utf-8") as file_:
-        print(file_.read())
+#    with open(Path("interface", "clover"), "r", encoding="utf-8") as file_:
+#        print(file_.read())
     try:
         gm = GameManager(get_generator())
         while True:

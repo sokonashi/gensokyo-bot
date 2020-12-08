@@ -13,7 +13,8 @@ from utils import cut_trailing_sentence, output, clear_lines, format_result, use
 if not settings.getboolean('force-cpu') and not torch.cuda.is_available():
     logger.warning('CUDA is not available, you are limited to CPU only.')
 
-DTYPE = torch.float32 if ((not torch.cuda.is_available()) or settings.getboolean('force-cpu')) else torch.float16
+DTYPE = torch.float32 if ((not torch.cuda.is_available()) or settings.getboolean('force-cpu')) else torch.float32
+#DTYPE = torch.float32
 logger.info('Cuda Available: {}    Force CPU: {}    Precision: {}'.format(torch.cuda.is_available(),
                                                                           settings.getboolean('force-cpu'),
                                                                           '32-bit' if DTYPE == torch.float32 else '16-bit'))
@@ -214,7 +215,7 @@ class GPT2Generator:
         else:
             raise ValueError(f"model_path must be either str or Path, got {type(model_path)}")
 
-        self.device = torch.device("cuda" if self.dtype == torch.float16 else "cpu")
+        self.device = torch.device("cuda" if self.dtype == torch.float16 else "cuda")
         logger.info(
             "Using device={}, checkpoint={}, dtype={}".format(self.device, str(self.checkpoint_path), self.dtype))
 
